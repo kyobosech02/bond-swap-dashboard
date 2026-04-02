@@ -87,8 +87,8 @@ if check_password():
     # ==========================================
     with st.sidebar:
         # 새로 추가된 문구 (안내 메시지 박스 형태)
-        st.info("💡 참고사항: 교보증권 채권운용부 유지민 (02-3771-9160)")
         st.header("⚙️ 분석 옵션 설정")
+        st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
         
         # 첫 번째 메뉴 익스팬더
         with st.expander("기간별 Bond-Swap sp 분석", expanded=True):
