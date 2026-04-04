@@ -86,7 +86,6 @@ if check_password():
     # 2. 사이드바 (UI 구조 변경: Expander 적용)
     # ==========================================
     with st.sidebar:
-        # 새로 추가된 문구 (안내 메시지 박스 형태)
         st.header("⚙️ 분석 옵션 설정")
         st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
         
@@ -300,22 +299,32 @@ if check_password():
                     curve_data['Min'].append(final_df.loc[min_idx, col])
                     curve_data['Min_Date'].append(final_df.loc[min_idx, '일자'].strftime('%Y-%m-%d'))
 
+                # --- x축 실제 간격 매핑 (수정된 부분) ---
+                # 3M(0.25), 6M(0.5), 9M(0.75), 1Y(1.0), 1.5Y(1.5), 2Y(2.0), 3Y(3.0), 4Y(4.0), 5Y(5.0)
+                x_numeric = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
+
                 fig2 = go.Figure()
 
-                fig2.add_trace(go.Scatter(x=maturities_list, y=curve_data['Latest'], mode='lines+markers', 
+                # x=maturities_list 대신 x=x_numeric 적용
+                fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Latest'], mode='lines+markers', 
                                           name=f"최근({latest_date.strftime('%m/%d')})", line=dict(color='red', width=2.5)))
-                fig2.add_trace(go.Scatter(x=maturities_list, y=curve_data['Avg'], mode='lines+markers', 
+                fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Avg'], mode='lines+markers', 
                                           name="평균(Avg)", line=dict(color='green', dash='dash')))
-                fig2.add_trace(go.Scatter(x=maturities_list, y=curve_data['Max'], mode='lines+markers', 
+                fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Max'], mode='lines+markers', 
                                           name="최대(Max)", line=dict(color='blue', dash='dot')))
-                fig2.add_trace(go.Scatter(x=maturities_list, y=curve_data['Min'], mode='lines+markers', 
+                fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Min'], mode='lines+markers', 
                                           name="최소(Min)", line=dict(color='purple', dash='dot')))
 
                 fig2.update_layout(height=400, hovermode="x unified", plot_bgcolor='white',
                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                                    margin=dict(l=0, r=0, t=50, b=0))
 
-                fig2.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+                # x축의 위치를 숫자값에 맞추되, 눈금 이름(ticktext)은 기존 3M, 6M 등으로 덮어씌움
+                fig2.update_xaxes(
+                    tickvals=x_numeric, 
+                    ticktext=maturities_list, 
+                    showgrid=True, gridwidth=1, gridcolor='LightGray'
+                )
                 fig2.update_yaxes(title_text="Spread (bp)", showgrid=True, gridwidth=1, gridcolor='LightGray')
 
                 st.plotly_chart(fig2, use_container_width=True)
