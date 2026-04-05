@@ -88,7 +88,7 @@ if check_password():
     with st.sidebar:
         st.header("⚙️ 분석 옵션 설정")
         # 조그마한 검정색 글씨로 한 줄로 표시
-        st.markdown('<p style="font-size: 0.8rem; color: black; margin-bottom: 0;">참고사항: 교보증권 채권운용부 유지민 (02-3771-9160)</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-size: 0.8rem; color: black; margin-bottom: 0;">교보증권 채권운용부 유지민 (02-3771-9160)</p>', unsafe_allow_html=True)
         
         # 첫 번째 메뉴 익스팬더 (Tab 1)
         with st.expander("기간별 Bond-Swap sp 분석", expanded=True):
