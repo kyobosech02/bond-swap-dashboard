@@ -381,7 +381,7 @@ if check_password():
                         return 'color: blue; font-weight: bold;'
                 return ''
 
-            styled_t2_table = df_t2_table.style.applymap(color_cells_t2)
+            styled_t2_table = df_t2_table.style.map(color_cells_t2)
             st.dataframe(styled_t2_table, use_container_width=True)
             
             st.divider()
