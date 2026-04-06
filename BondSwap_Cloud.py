@@ -194,7 +194,7 @@ if check_password():
     # x축 실제 간격 매핑 공통 (3M, 6M, 9M, 1Y, 1.5Y, 2Y, 3Y, 4Y, 5Y)
     x_numeric = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
 
-    st.title("📈 채권 스프레드 대시보드")
+    st.title("📈 Bond-Swap Spread Dashboard")
     
     # 탭 생성
     tab1, tab2 = st.tabs(["기간별 Bond-Swap sp 분석", "크레딧 스프레드 분석"])
