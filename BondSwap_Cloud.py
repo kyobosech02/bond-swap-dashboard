@@ -88,7 +88,7 @@ if check_password():
     with st.sidebar:
         st.header("⚙️ 분석 옵션 설정")
         # 조그마한 검정색 글씨로 한 줄로 표시
-        st.markdown('<p style="font-size: 0.8rem; color: black; margin-bottom: 0;">참고사항: 교보증권 채권운용부 유지민 (02-3771-9160)</p>', unsafe_allow_html=True)
+        st.caption("참고사항: 교보증권 채권운용부 유지민 (02-3771-9160)")
         
         # 첫 번째 메뉴 익스팬더 (Tab 1)
         with st.expander("기간별 Bond-Swap sp 분석", expanded=True):
@@ -262,7 +262,8 @@ if check_password():
                 exp_col1, exp_col2 = st.columns(2)
                 with exp_col1:
                     with st.expander("📋 상세데이터"):
-                        detail_df = chart_df_t1.copy()
+                        # 사용자가 표를 볼 때 최근 날짜부터 볼 수 있도록 내림차순 정렬 추가
+                        detail_df = chart_df_t1.sort_values('일자', ascending=False).copy()
                         detail_df['일자'] = detail_df['일자'].dt.strftime('%Y-%m-%d')
                         detail_df.columns = ['영업일', '채권(%)', 'IRS(%)', 'Spread(bp)']
                         detail_df.set_index('영업일', inplace=True)
@@ -431,7 +432,8 @@ if check_password():
                 st.plotly_chart(fig_t2_lt, use_container_width=True)
                 
                 with st.expander("📋 상세 데이터 확인"):
-                    detail_df_t2 = chart_df_t2.copy()
+                    # 사용자가 표를 볼 때 최근 날짜부터 볼 수 있도록 내림차순 정렬 추가
+                    detail_df_t2 = chart_df_t2.sort_values('일자', ascending=False).copy()
                     detail_df_t2['일자'] = detail_df_t2['일자'].dt.strftime('%Y-%m-%d')
                     detail_df_t2.columns = ['영업일', f'{t2_bond1}(%)', f'{t2_bond2}(%)', 'Spread(bp)']
                     detail_df_t2.set_index('영업일', inplace=True)
