@@ -391,7 +391,7 @@ if check_password():
 
             # [좌측 차트] 기간 내 금리 및 스프레드 추이
             with t2_chart_col1:
-                st.subheader(f"📉 추이 그래프 ({t2_selected_mat})")
+                st.subheader(f"📉 크레딧 스프레드 추이 ({t2_selected_mat})")
                 
                 fig_t2_lt = make_subplots(specs=[[{"secondary_y": True}]])
                 
