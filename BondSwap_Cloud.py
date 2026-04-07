@@ -91,7 +91,7 @@ if check_password():
         st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
         
         # 첫 번째 메뉴 익스팬더 (Tab 1)
-        with st.expander("기간별 Bond-Swap sp 분석", expanded=True):
+        with st.expander("1) Bond Swap spread 분석", expanded=True):
             st.markdown("**1. 채권 종류**")
             bond_list = list(bond_data.keys())
             selected_bond = st.selectbox("1. 채권 종류", bond_list, index=0, label_visibility="collapsed")
@@ -111,12 +111,12 @@ if check_password():
             with col_end:
                 end_date = st.date_input("종료일", max_date, min_value=min_date, max_value=max_date, key='t1_ed')
                 
-            st.markdown("**3. 그래프 분석 만기 (차트 전용)**")
+            st.markdown("**3. 그래프 분석 만기 **")
             maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
             selected_mat = st.selectbox("3. 분석 만기", maturities_list, index=3, label_visibility="collapsed")
 
         # 두 번째 메뉴 익스팬더 (Tab 2)
-        with st.expander("크레딧 스프레드 분석", expanded=False):
+        with st.expander("2) Credit Spread 분석", expanded=False):
             # 기본값 세팅: 은행채 AAA, 국고채권
             default_bond1_idx = bond_list.index('은행채 AAA') if '은행채 AAA' in bond_list else 0
             default_bond2_idx = bond_list.index('국고채권') if '국고채권' in bond_list else 0
@@ -197,7 +197,7 @@ if check_password():
     st.title("📈 Bond-Swap Spread Dashboard")
     
     # 탭 생성
-    tab1, tab2 = st.tabs(["기간별 Bond-Swap sp 분석", "크레딧 스프레드 분석"])
+    tab1, tab2 = st.tabs(["1) Bond Swap Spread 분석", "2) Credit Spread 분석"])
 
     # ------------------------------------------
     # [첫 번째 탭] 기존 분석 화면
@@ -283,7 +283,7 @@ if check_password():
                             st.table(pd.DataFrame(stats_data).set_index("항목"))
 
             with chart_col2:
-                st.subheader("📉 만기별 Spread 커브 (Term Structure)")
+                st.subheader("📉 만기별 Spread 커브")
                 latest_date = final_df['일자'].max()
                 latest_row = final_df[final_df['일자'] == latest_date].iloc[0]
 
