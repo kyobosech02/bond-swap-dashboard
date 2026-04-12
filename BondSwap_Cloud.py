@@ -22,10 +22,54 @@ def check_password():
             st.error("비밀번호가 틀렸습니다.")
     return False
 
+# --- 완벽한 병합 및 스타일을 위한 HTML 렌더링 함수 ---
+def render_merged_html(df):
+    # 인덱스 이름(큰분류, 세부분류 등)을 헤더에서 깔끔하게 제거
+    df.index.names = [None] * len(df.index.names)
+    
+    # Pandas의 to_html은 MultiIndex를 자동으로 병합(rowspan) 해줍니다.
+    raw_html = df.to_html(float_format=lambda x: f"{x:,.0f}")
+    
+    # 세부분류 구분이 확 띄도록 커스텀 CSS 적용
+    custom_css = """
+    <style>
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Arial', sans-serif;
+            font-size: 14px;
+        }
+        .custom-table th, .custom-table td {
+            border: 1px solid #777; /* 기본 얇은 테두리 */
+            padding: 8px;
+            text-align: center !important;
+            vertical-align: middle !important; /* 병합된 셀 텍스트를 정중앙에 위치 */
+        }
+        .custom-table thead th {
+            background-color: #d5d8dc;
+            border: 2px solid #222; /* 열 헤더 진한 테두리 */
+            font-weight: bold;
+        }
+        .custom-table tbody th {
+            background-color: #eaeded;
+            border: 2px solid #222; /* 행 분류(병합된 셀) 진한 테두리 */
+            font-weight: bold;
+        }
+        /* 숫자가 들어가는 일반 데이터 셀은 흰색 배경 */
+        .custom-table tbody td {
+            background-color: #ffffff;
+        }
+    </style>
+    """
+    
+    # Pandas가 생성한 테이블에 custom-table 클래스 부여
+    styled_html = raw_html.replace('<table border="1" class="dataframe">', '<table class="custom-table">')
+    return custom_css + styled_html
+
+
 if check_password():
     st.title("원화채권 포지션 현황")
 
-    # 엑셀 파일 경로
     file_path = "포지션 보고양식 예시.xlsx"
 
     @st.cache_data
@@ -43,7 +87,6 @@ if check_password():
         data = pd.concat(df_list, ignore_index=True)
         data = data[data['펀드코드'] != 8018].copy()
         
-        # 채권종류 분류
         def classify_bond(row):
             ctype, name = str(row['채권종류']).strip(), str(row['종목명']).strip()
             if ctype in ['국채', '통안채', '지방채']: return '국고/통안채'
@@ -83,15 +126,6 @@ if check_password():
         data[['큰분류', '세부분류', '세세부']] = data.apply(lambda row: pd.Series(classify_fund(row['펀드코드'])), axis=1)
         return data
 
-    # 스타일 적용 함수: 세부분류가 바뀔 때 배경색을 넣어 구분감 극대화
-    def style_dataframe(df):
-        return df.style.format("{:,.1f}") \
-            .set_properties(**{'border': '1px solid black', 'text-align': 'center'}) \
-            .set_table_styles([
-                {'selector': 'th', 'props': [('background-color', '#e0e0e0'), ('border', '2px solid black'), ('font-weight', 'bold')]},
-                {'selector': 'td', 'props': [('border', '1px solid #444')]}
-            ])
-
     df = load_and_preprocess_data()
 
     if not df.empty:
@@ -112,9 +146,9 @@ if check_password():
                 rp_pivot = rp_pivot[cols]
                 rp_pivot['합계'] = rp_pivot.sum(axis=1)
                 
-                # 표 높이 계산 (스크롤 없이 보여주기 위함)
-                h = (len(rp_pivot) + 1) * 38 + 50
-                st.dataframe(style_dataframe(rp_pivot), use_container_width=True, height=int(h))
+                # st.dataframe 대신 HTML 렌더링 사용
+                html_table = render_merged_html(rp_pivot)
+                st.markdown(html_table, unsafe_allow_html=True)
             else:
                 st.info("데이터가 없습니다.")
 
@@ -129,8 +163,9 @@ if check_password():
                 prop_pivot = prop_pivot[cols]
                 prop_pivot['합계'] = prop_pivot.sum(axis=1)
                 
-                h = (len(prop_pivot) + 1) * 38 + 50
-                st.dataframe(style_dataframe(prop_pivot), use_container_width=True, height=int(h))
+                # st.dataframe 대신 HTML 렌더링 사용
+                html_table = render_merged_html(prop_pivot)
+                st.markdown(html_table, unsafe_allow_html=True)
             else:
                 st.info("데이터가 없습니다.")
     else:
