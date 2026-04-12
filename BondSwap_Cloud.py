@@ -25,8 +25,11 @@ def check_password():
 if check_password():
     st.title("원화채권 포지션 및 델타 현황")
 
-    # 엑셀 파일 경로
     file_path = "포지션 보고양식 예시.xlsx"
+
+    # 고정 순서 정의
+    BOND_ORDER = ['국고/통안채', '특은채', '시은채', '특수채', '여전채', '기타금융채']
+    MATURITY_ORDER = ['0.25Y', '0.5Y', '1Y', '1.5Y', '2Y', '2.5Y', '3Y', '5Y', '10Y', '20Y', '30Y']
 
     @st.cache_data
     def load_and_preprocess_data():
@@ -62,17 +65,15 @@ if check_password():
         data['잔존년수'] = (data['만기일자'] - data['평가일자']).dt.days / 365.0
         
         def classify_maturity(years):
-            bins = [0, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 5, 10, 20, 100]
-            labels = ['0.25Y', '0.5Y', '1Y', '1.5Y', '2Y', '2.5Y', '3Y', '5Y', '10Y', '20Y', '30Y']
+            bins = [0, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 5, 10, 20, 1000]
+            labels = MATURITY_ORDER
             for i, b in enumerate(bins[1:]):
                 if years <= b: return labels[i]
             return '30Y'
         data['분류_잔존만기'] = data['잔존년수'].apply(classify_maturity)
         
-        # 3. 데이터 계산 (소수점 제거는 스타일에서 처리)
-        # 포지션 = 수량 / 100,000 (단위: 억원)
+        # 3. 데이터 계산 (포지션 억원, 델타 만원)
         data['포지션'] = data['수량'] / 100000.0
-        # 델타 = (평가금액 * 수정듀레이션) / 100,000,000 (단위: 만원)
         data['델타'] = (data['평가금액'] * data['수정듀레이션']) / 100000000.0
         
         # 4. 펀드별 카테고리 매핑
@@ -89,19 +90,42 @@ if check_password():
         data[['큰분류', '세부분류', '세세부']] = data.apply(lambda row: pd.Series(classify_fund(row['펀드코드'])), axis=1)
         return data
 
-    def add_subtotals(df, group_levels):
-        """특정 레벨별로 소계를 추가하는 함수"""
-        # 그룹별 합계 계산
-        subtotal = df.groupby(level=group_levels).sum()
-        # 소계 행임을 표시하기 위해 마지막 인덱스에 '소계' 삽입
-        new_indices = []
-        for idx in subtotal.index:
-            new_idx = list(idx) + ['소계']
-            new_indices.append(tuple(new_idx))
-        subtotal.index = pd.MultiIndex.from_tuples(new_indices, names=df.index.names)
-        # 기존 데이터와 소계 합치고 정렬
-        combined = pd.concat([df, subtotal]).sort_index()
-        return combined
+    def process_pivot_with_fixed_order(df, index_cols, target_col):
+        """값이 없어도 모든 채권종류를 고정 순서로 생성하고 소계를 추가하는 함수"""
+        # 피벗 생성
+        pivot = pd.pivot_table(df, values=target_col, index=index_cols + ['분류_채권종류'], 
+                               columns='분류_잔존만기', aggfunc='sum', fill_value=0)
+        
+        # 모든 만기 컬럼 확보
+        for m in MATURITY_ORDER:
+            if m not in pivot.columns: pivot[m] = 0
+        pivot = pivot[MATURITY_ORDER]
+
+        # 모든 조합 생성 (Reindexing)
+        # 상위 인덱스 레벨들의 유니크 값 추출
+        unique_levels = [pivot.index.get_level_values(i).unique() for i in range(len(index_cols))]
+        # 채권종류는 BOND_ORDER로 고정
+        unique_levels.append(BOND_ORDER)
+        
+        full_index = pd.MultiIndex.from_product(unique_levels, names=pivot.index.names)
+        pivot = pivot.reindex(full_index, fill_value=0)
+
+        # 소계 계산 및 삽입
+        final_rows = []
+        # 상위 그룹별로 순회하며 소계 추가
+        for name, group in pivot.groupby(level=list(range(len(index_cols)))):
+            final_rows.append(group)
+            # 소계 행 생성
+            subtotal_row = group.sum().to_frame().T
+            # 소계 인덱스 설정 (마지막 레벨을 '소계'로)
+            sub_idx = list(name) if isinstance(name, tuple) else [name]
+            sub_idx.append('소계')
+            subtotal_row.index = pd.MultiIndex.from_tuples([tuple(sub_idx)], names=pivot.index.names)
+            final_rows.append(subtotal_row)
+            
+        result = pd.concat(final_rows)
+        result['합계'] = result.sum(axis=1)
+        return result
 
     def style_dataframe(df):
         return df.style.format("{:,.0f}") \
@@ -119,7 +143,6 @@ if check_password():
         view_type = st.radio("표시 데이터 선택", ["포지션 (단위: 억원)", "델타 (단위: 만원)"], horizontal=True)
         target_col = "포지션" if "포지션" in view_type else "델타"
         
-        maturity_order = ['0.25Y', '0.5Y', '1Y', '1.5Y', '2Y', '2.5Y', '3Y', '5Y', '10Y', '20Y', '30Y']
         rp_order = ['대고객 RP(8010)', 'CMA RP(8013)', '기관RP(9994)', '외화RP(7120)']
         
         tab1, tab2 = st.tabs([f"🏛️ RP운용 ({target_col})", f"📈 상품채권운용 ({target_col})"])
@@ -127,17 +150,14 @@ if check_password():
         with tab1:
             rp_df = df[df['큰분류'] == 'RP운용'].copy()
             if not rp_df.empty:
+                # RP 세부분류 순서 강제 지정을 위해 Categorical 사용
                 rp_df['세부분류'] = pd.Categorical(rp_df['세부분류'], categories=rp_order, ordered=True)
-                pivot = pd.pivot_table(rp_df, values=target_col, 
-                                      index=['큰분류', '세부분류', '분류_채권종류'], 
-                                      columns='분류_잔존만기', aggfunc='sum', fill_value=0).sort_index(level='세부분류')
                 
-                # 소계 추가 (큰분류, 세부분류 기준)
-                pivot = add_subtotals(pivot, [0, 1])
+                # 피벗 및 소계 처리 (큰분류, 세부분류 기준)
+                pivot = process_pivot_with_fixed_order(rp_df, ['큰분류', '세부분류'], target_col)
                 
-                cols = [c for c in maturity_order if c in pivot.columns]
-                pivot = pivot[cols]
-                pivot['전체합계'] = pivot.sum(axis=1) 
+                # Categorical 순서에 따라 정렬
+                pivot = pivot.sort_index(level='세부분류', sort_remaining=False)
                 
                 h = (len(pivot) + 1) * 38 + 50
                 st.dataframe(style_dataframe(pivot), use_container_width=True, height=int(h))
@@ -145,18 +165,10 @@ if check_password():
                 st.info("데이터가 없습니다.")
 
         with tab2:
-            prop_df = df[df['큰분류'] == '상품채권운용']
+            prop_df = df[df['큰분류'] == '상품채권운용'].copy()
             if not prop_df.empty:
-                pivot = pd.pivot_table(prop_df, values=target_col, 
-                                       index=['큰분류', '세부분류', '세세부', '분류_채권종류'], 
-                                       columns='분류_잔존만기', aggfunc='sum', fill_value=0)
-                
-                # 소계 추가 (큰분류, 세부분류, 세세부 기준)
-                pivot = add_subtotals(pivot, [0, 1, 2])
-                
-                cols = [c for c in maturity_order if c in pivot.columns]
-                pivot = pivot[cols]
-                pivot['전체합계'] = pivot.sum(axis=1)
+                # 피벗 및 소계 처리 (큰분류, 세부분류, 세세부 기준)
+                pivot = process_pivot_with_fixed_order(prop_df, ['큰분류', '세부분류', '세세부'], target_col)
                 
                 h = (len(pivot) + 1) * 38 + 50
                 st.dataframe(style_dataframe(pivot), use_container_width=True, height=int(h))
