@@ -4,25 +4,21 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
 
-# ==========================================
 # 페이지 기본 설정 (반드시 최상단에 위치)
-# ==========================================
 st.set_page_config(page_title="Bond-Swap Spread 분석", page_icon="📈", layout="wide")
 
-# 모바일 환경 최적화를 위한 CSS 주입 (PC 화면은 영향 없음)
+# ==========================================
+# 모바일 환경 최적화를 위한 CSS 주입 (기능에 영향 없음)
+# ==========================================
 st.markdown("""
     <style>
-    /* 모바일 기기 (화면 폭 768px 이하) 전용 스타일 */
+    /* 스마트폰 등 좁은 화면에서만 표와 글씨 크기를 줄여 한눈에 보이게 함 */
     @media (max-width: 768px) {
         .stDataFrame, .stTable {
-            font-size: 11px !important; /* 모바일에서 표 글씨 크기 축소 */
+            font-size: 11px !important;
         }
         div[data-testid="stExpander"] {
-            font-size: 14px !important; /* 익스팬더 글씨 크기 최적화 */
-        }
-        /* 사이드바 글씨 크기 최적화 */
-        .css-1d391kg p {
-            font-size: 14px !important; 
+            font-size: 14px !important;
         }
     }
     </style>
@@ -32,45 +28,47 @@ st.markdown("""
 # 0. 비밀번호 인증 로직
 # ==========================================
 def check_password():
-    """비밀번호 인증"""
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-
-    if st.session_state["password_correct"]:
-        return True
-
-    password = st.text_input("비밀번호를 입력하세요", type="password")
-    if password:
-        if password == "kyoboh02":
+    """Returns `True` if the user had the correct password."""
+    def password_entered():
+        # 여기에 설정한 비밀번호 입력
+        if st.session_state["password"] == "kyoboh02":
             st.session_state["password_correct"] = True
-            st.rerun()
+            del st.session_state["password"]  # 보안을 위해 입력한 비밀번호 기록 삭제
         else:
-            st.error("비밀번호가 일치하지 않습니다.")
-    return False
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.text_input("비밀번호를 입력하세요", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.text_input("비밀번호를 입력하세요", type="password", on_change=password_entered, key="password")
+        st.error("비밀번호가 틀렸습니다.")
+        return False
+    return True
 
 # ==========================================
-# 1. 데이터 로드 및 전처리 함수 정의
+# 1. 데이터 로드 및 전처리 함수 정의 (유저 원본 로직 100% 유지)
 # ==========================================
 @st.cache_data
 def load_data():
     file_path = "Data.xlsx"
-
+    
     # --- 1. BOND 데이터 처리 ---
     bond_raw = pd.read_excel(file_path, sheet_name='BOND', header=None)
     bond_dict = {}
     maturities = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
     
-    for i in range(1, bond_raw.shape[1], 2):
-        bond_name = bond_raw.iloc[1, i]
-        if pd.isna(bond_name): continue
+    for i in range(0, bond_raw.shape[1], 10):
+        bond_name = bond_raw.iloc[1, i+1]
+        if pd.isna(bond_name):
+            bond_name = bond_raw.iloc[2, i]
+            if pd.isna(bond_name): continue
             
-        df_temp = bond_raw.iloc[4:, [0, i]].copy()
-        df_temp.columns = ['일자', '금리']
+        df_temp = bond_raw.iloc[4:, i:i+10].copy()
+        df_temp.columns = ['일자'] + maturities
         df_temp['일자'] = pd.to_datetime(df_temp['일자'], errors='coerce')
-        df_temp['금리'] = pd.to_numeric(df_temp['금리'], errors='coerce')
-        
-        for j, mat in enumerate(maturities):
-            df_temp[mat] = pd.to_numeric(bond_raw.iloc[4:, i+j], errors='coerce')
+        for col in maturities:
+            df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce')
             
         bond_dict[bond_name] = df_temp.dropna(subset=['일자']).sort_values('일자').reset_index(drop=True)
 
@@ -79,17 +77,15 @@ def load_data():
     irs_dict = {}
     irs_mat_names = ['CD91', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
     
-    for i in range(1, irs_raw.shape[1]):
-        mat_name = irs_raw.iloc[1, i]
-        if pd.isna(mat_name) or mat_name not in irs_mat_names: continue
-            
-        df_temp = irs_raw.iloc[3:, [0, i]].copy()
+    for i, mat_label in enumerate(irs_mat_names):
+        col_idx = i * 2
+        df_temp = irs_raw.iloc[4:, col_idx:col_idx+2].copy()
         df_temp.columns = ['일자', '금리']
         df_temp['일자'] = pd.to_datetime(df_temp['일자'], errors='coerce')
         df_temp['금리'] = pd.to_numeric(df_temp['금리'], errors='coerce')
         
-        irs_dict[mat_name] = df_temp.dropna(subset=['일자']).sort_values('일자').reset_index(drop=True)
-
+        irs_dict[mat_label] = df_temp.dropna(subset=['일자']).sort_values('일자').reset_index(drop=True)
+        
     return bond_dict, irs_dict
 
 
@@ -103,16 +99,14 @@ if check_password():
         st.error(f"🚨 엑셀 파일을 읽는 중 오류가 발생했습니다.\nError: {e}")
         st.stop()
 
-    maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
-    x_numeric = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
-
     # ==========================================
     # 2. 사이드바 (UI 구조)
     # ==========================================
     with st.sidebar:
         st.header("⚙️ 분석 옵션 설정")
+        # 조그마한 검정색 글씨로 한 줄로 표시
         st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
-
+        
         # 첫 번째 메뉴 익스팬더 (Tab 1)
         with st.expander("1) Bond Swap spread 분석", expanded=True):
             st.markdown("**1. 채권 종류**")
@@ -134,11 +128,13 @@ if check_password():
             with col_end:
                 end_date = st.date_input("종료일", max_date, min_value=min_date, max_value=max_date, key='t1_ed')
                 
-            st.markdown("**3. 그래프 분석 만기**")
+            st.markdown("**3. 그래프 분석 만기 **")
+            maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
             selected_mat = st.selectbox("3. 분석 만기", maturities_list, index=3, label_visibility="collapsed")
 
         # 두 번째 메뉴 익스팬더 (Tab 2)
         with st.expander("2) Credit Spread 분석", expanded=False):
+            # 기본값 세팅: 은행채 AAA, 국고채권
             default_bond1_idx = bond_list.index('은행채 AAA') if '은행채 AAA' in bond_list else 0
             default_bond2_idx = bond_list.index('국고채권') if '국고채권' in bond_list else 0
             
@@ -159,13 +155,14 @@ if check_password():
             st.markdown("**3. 분석 기간**")
             t2_col_start, t2_col_end = st.columns(2)
             with t2_col_start:
-                t2_start_date = st.date_input("시작일 ", default_start_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_sd')
+                t2_start_date = st.date_input("시작일", default_start_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_sd')
             with t2_col_end:
-                t2_end_date = st.date_input("종료일 ", max_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_ed')
+                t2_end_date = st.date_input("종료일", max_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_ed')
                 
             st.markdown("**4. 그래프 분석 만기**")
+            # 기본값 2Y
             default_mat_idx = maturities_list.index('2Y') if '2Y' in maturities_list else 5
-            t2_selected_mat = st.selectbox("분석 만기 ", maturities_list, index=default_mat_idx, key='t2_mat', label_visibility="collapsed")
+            t2_selected_mat = st.selectbox("분석 만기", maturities_list, index=default_mat_idx, key='t2_mat', label_visibility="collapsed")
 
     # ==========================================
     # 3. 데이터 병합 및 계산 로직
@@ -183,37 +180,44 @@ if check_password():
         irs_dfs.append(temp)
 
     df_irs_all = irs_dfs[0]
-    for temp_df in irs_dfs[1:]: 
+    for temp_df in irs_dfs[1:]:
         df_irs_all = pd.merge(df_irs_all, temp_df, on='일자', how='outer')
-        
+
     merged_df = pd.merge(df_bond, df_irs_all, on='일자', how='inner')
-    for m in maturities_list: 
+    for m in maturities_list:
         merged_df[f'{m}_Spread'] = (merged_df[f'{m}_IRS'] - merged_df[f'{m}_Bond']) * 100
-        
+
     mask = (merged_df['일자'].dt.date >= start_date) & (merged_df['일자'].dt.date <= end_date)
     final_df = merged_df.loc[mask].sort_values('일자').reset_index(drop=True).copy()
 
     # [Tab 2 데이터 생성]
-    df_t2_b1 = bond_data[t2_bond1].copy().rename(columns={m: f'{m}_B1' for m in maturities_list})
-    df_t2_b2 = bond_data[t2_bond2].copy().rename(columns={m: f'{m}_B2' for m in maturities_list})
-    
+    df_t2_b1 = bond_data[t2_bond1].copy()
+    df_t2_b2 = bond_data[t2_bond2].copy()
+    b1_rename = {m: f'{m}_B1' for m in maturities_list}
+    b2_rename = {m: f'{m}_B2' for m in maturities_list}
+    df_t2_b1.rename(columns=b1_rename, inplace=True)
+    df_t2_b2.rename(columns=b2_rename, inplace=True)
+
     df_t2_merged = pd.merge(df_t2_b1, df_t2_b2, on='일자', how='inner')
-    for m in maturities_list: 
+    for m in maturities_list:
         df_t2_merged[f'{m}_Spread'] = (df_t2_merged[f'{m}_B1'] - df_t2_merged[f'{m}_B2']) * 100
-        
+
     mask_t2 = (df_t2_merged['일자'].dt.date >= t2_start_date) & (df_t2_merged['일자'].dt.date <= t2_end_date)
     t2_final_df = df_t2_merged.loc[mask_t2].sort_values('일자').reset_index(drop=True).copy()
-
 
     # ==========================================
     # 4. 메인 화면 출력 (Tab 분리)
     # ==========================================
+    # x축 실제 간격 매핑 공통 (3M, 6M, 9M, 1Y, 1.5Y, 2Y, 3Y, 4Y, 5Y)
+    x_numeric = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
+
     st.title("📈 Bond-Swap Spread Dashboard")
     
+    # 탭 생성
     tab1, tab2 = st.tabs(["1) Bond Swap Spread 분석", "2) Credit Spread 분석"])
 
     # ------------------------------------------
-    # [첫 번째 탭] 1) Bond Swap Spread 분석
+    # [첫 번째 탭] 기존 분석 화면
     # ------------------------------------------
     with tab1:
         st.markdown(f"**선택된 채권:** `{selected_bond}` &nbsp;|&nbsp; **분석 기간:** `{start_date} ~ {end_date}`")
@@ -239,7 +243,6 @@ if check_password():
             def highlight_spread(s):
                 return ['font-weight: 900; color: #003366; background-color: #E8F4F8;' for _ in s]
 
-            # 딕셔너리 생성 구문 오류 수정 부분
             format_dict = {}
             for m in maturities_list:
                 format_dict[(m, '채권(%)')] = "{:.3f}"
@@ -256,6 +259,8 @@ if check_password():
 
             with chart_col1:
                 st.subheader(f"📉 금리 및 스프레드 추이 ({selected_mat})")
+                
+                # 결측치(NaN)로 인해 그래프가 0으로 떨어지는 현상 방지
                 chart_df_t1 = final_df[['일자', f'{selected_mat}_Bond', f'{selected_mat}_IRS', f'{selected_mat}_Spread']].dropna().sort_values('일자')
                 
                 fig1 = make_subplots(specs=[[{"secondary_y": True}]])
@@ -265,8 +270,8 @@ if check_password():
                 fig1.add_trace(go.Scatter(x=chart_df_t1['일자'], y=chart_df_t1[f'{selected_mat}_IRS'], name=f"IRS금리 ({irs_key_display})", line=dict(color='#E67E22', width=2, dash='dash'), hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 fig1.add_trace(go.Scatter(x=chart_df_t1['일자'], y=chart_df_t1[f'{selected_mat}_Spread'], name="Spread (bp)", mode='lines', line=dict(color='rgba(108, 122, 137, 0.9)', width=2.5), fill='tozeroy', fillcolor='rgba(108, 122, 137, 0.1)'), secondary_y=True)
 
-                # 범례(Legend)를 모바일에서도 방해되지 않도록 차트 하단으로 이동 (y=-0.2)
-                fig1.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=0))
+                # [수정포인트] 모바일에서 범례(Legend)가 차트를 가리지 않도록 하단(y=-0.2)으로 이동, 여백(margin b=80) 추가
+                fig1.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=80))
                 fig1.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
                 fig1.update_yaxes(title_text="금리 (%)", showgrid=True, gridwidth=1, gridcolor='LightGray', secondary_y=False)
                 fig1.update_yaxes(title_text="Spread (bp)", showgrid=False, secondary_y=True)
@@ -275,6 +280,7 @@ if check_password():
                 exp_col1, exp_col2 = st.columns(2)
                 with exp_col1:
                     with st.expander("📋 상세데이터"):
+                        # 사용자가 표를 볼 때 최근 날짜부터 볼 수 있도록 내림차순 정렬 추가
                         detail_df = chart_df_t1.sort_values('일자', ascending=False).copy()
                         detail_df['일자'] = detail_df['일자'].dt.strftime('%Y-%m-%d')
                         detail_df.columns = ['영업일', '채권(%)', 'IRS(%)', 'Spread(bp)']
@@ -298,7 +304,8 @@ if check_password():
                 st.subheader("📉 만기별 Spread 커브")
                 latest_date = final_df['일자'].max()
                 latest_row = final_df[final_df['일자'] == latest_date].iloc[0]
-                
+
+                # 수정된 부분: Bond, IRS 데이터도 가져오기
                 curve_data = {'Latest': [], 'Avg': [], 'Max': [], 'Max_Date': [], 'Min': [], 'Min_Date': [], 'Bond': [], 'IRS': []}
                 for m in maturities_list:
                     col = f'{m}_Spread'
@@ -313,18 +320,24 @@ if check_password():
                     curve_data['IRS'].append(latest_row[f'{m}_IRS'])
 
                 fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 추가됨: 금리 선그래프 (처음에는 숨김)
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Bond'], mode='lines+markers', name=f"채권금리 ({selected_bond})", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['IRS'], mode='lines+markers', name="IRS금리", line=dict(color='#E67E22', width=2, dash='dash'), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
 
+                # 기존 코드 원상복구: Spread 커브
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Latest'], mode='lines+markers', name=f"최근({latest_date.strftime('%m/%d')})", line=dict(color='red', width=2.5)), secondary_y=True)
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Avg'], mode='lines+markers', name="평균(Avg)", line=dict(color='green', dash='dash')), secondary_y=True)
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Max'], mode='lines+markers', name="최대(Max)", line=dict(color='blue', dash='dot')), secondary_y=True)
                 fig2.add_trace(go.Scatter(x=x_numeric, y=curve_data['Min'], mode='lines+markers', name="최소(Min)", line=dict(color='purple', dash='dot')), secondary_y=True)
 
-                fig2.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=0))
+                # [수정포인트] 모바일 범례 위치 및 여백 조절
+                fig2.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=80))
                 fig2.update_xaxes(tickvals=x_numeric, ticktext=maturities_list, showgrid=True, gridwidth=1, gridcolor='LightGray')
+                # 이중 축 설정 업데이트
                 fig2.update_yaxes(title_text="금리 (%)", showgrid=True, gridwidth=1, gridcolor='LightGray', secondary_y=False)
                 fig2.update_yaxes(title_text="Spread (bp)", showgrid=False, secondary_y=True)
+                
                 st.plotly_chart(fig2, use_container_width=True)
 
                 with st.expander("📊 만기별 Spread 상세 데이터 및 기록 날짜"):
@@ -337,14 +350,14 @@ if check_password():
                     st.table(display_curve_df)
 
     # ------------------------------------------
-    # [두 번째 탭] 2) Credit Spread 분석
+    # [두 번째 탭] 신규 기능: 크레딧 스프레드
     # ------------------------------------------
     with tab2:
         st.markdown(f"**비교 대상:** `{t2_bond1}` &nbsp;|&nbsp; **기준 대상:** `{t2_bond2}` &nbsp;|&nbsp; **분석 기간:** `{t2_start_date} ~ {t2_end_date}`")
         if t2_final_df.empty:
             st.warning("선택하신 기간 내에 유효한 데이터가 없습니다.")
         else:
-            # --- 1) 스프레드 요약 표 ---
+            # --- 1) 스프레드 요약 표 (기존 코드 유지) ---
             st.subheader("📊 크레딧 스프레드 요약")
             
             latest_t2 = t2_final_df.iloc[-1]
@@ -392,31 +405,53 @@ if check_password():
 
             def color_cells_t2(val):
                 if isinstance(val, str):
-                    if '▲' in val: return 'color: red; font-weight: bold;'
-                    elif '▼' in val: return 'color: blue; font-weight: bold;'
+                    if '▲' in val:
+                        return 'color: red; font-weight: bold;'
+                    elif '▼' in val:
+                        return 'color: blue; font-weight: bold;'
                 return ''
 
             styled_t2_table = df_t2_table.style.map(color_cells_t2)
             st.dataframe(styled_t2_table, use_container_width=True)
+            
             st.divider()
 
             # --- 2) 차트 좌우 배치 ---
             t2_chart_col1, t2_chart_col2 = st.columns(2)
 
+            # [좌측 차트] 기간 내 금리 및 스프레드 추이 (기존 코드 유지)
             with t2_chart_col1:
                 st.subheader(f"📉 크레딧 스프레드 추이 ({t2_selected_mat})")
-                chart_df_t2 = t2_final_df[['일자', f'{t2_selected_mat}_B1', f'{t2_selected_mat}_B2', f'{t2_selected_mat}_Spread']].dropna().sort_values('일자')
                 
+                chart_df_t2 = t2_final_df[['일자', f'{t2_selected_mat}_B1', f'{t2_selected_mat}_B2', f'{t2_selected_mat}_Spread']].dropna().sort_values('일자')
                 fig_t2_lt = make_subplots(specs=[[{"secondary_y": True}]])
-                fig_t2_lt.add_trace(go.Scatter(x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_B1'], name=f"{t2_bond1}", line=dict(color='#2E86C1', width=2), hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
-                fig_t2_lt.add_trace(go.Scatter(x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_B2'], name=f"{t2_bond2}", line=dict(color='#E67E22', width=2, dash='dash'), hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
-                fig_t2_lt.add_trace(go.Scatter(x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_Spread'], name="Spread (bp)", mode='lines', line=dict(color='rgba(211, 84, 0, 0.9)', width=2.5), fill='tozeroy', fillcolor='rgba(211, 84, 0, 0.1)', hovertemplate="%{y:.1f} bp<extra></extra>"), secondary_y=True)
+                
+                fig_t2_lt.add_trace(go.Scatter(
+                    x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_B1'],
+                    name=f"{t2_bond1}", line=dict(color='#2E86C1', width=2),
+                    hovertemplate="%{y:.3f}%<extra></extra>"
+                ), secondary_y=False)
+                
+                fig_t2_lt.add_trace(go.Scatter(
+                    x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_B2'],
+                    name=f"{t2_bond2}", line=dict(color='#E67E22', width=2, dash='dash'),
+                    hovertemplate="%{y:.3f}%<extra></extra>"
+                ), secondary_y=False)
+                
+                fig_t2_lt.add_trace(go.Scatter(
+                    x=chart_df_t2['일자'], y=chart_df_t2[f'{t2_selected_mat}_Spread'],
+                    name="Spread (bp)", mode='lines',
+                    line=dict(color='rgba(211, 84, 0, 0.9)', width=2.5),
+                    fill='tozeroy', fillcolor='rgba(211, 84, 0, 0.1)',
+                    hovertemplate="%{y:.1f} bp<extra></extra>"
+                ), secondary_y=True)
 
-                # 범례(Legend) 하단 이동
-                fig_t2_lt.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=0))
+                # [수정포인트] 모바일 범례 위치 및 여백 조절
+                fig_t2_lt.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=80))
                 fig_t2_lt.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
                 fig_t2_lt.update_yaxes(title_text="금리 (%)", showgrid=True, gridwidth=1, gridcolor='LightGray', secondary_y=False)
                 fig_t2_lt.update_yaxes(title_text="Spread (bp)", showgrid=False, secondary_y=True)
+                
                 st.plotly_chart(fig_t2_lt, use_container_width=True)
                 
                 with st.expander("📋 상세 데이터 확인"):
@@ -426,8 +461,10 @@ if check_password():
                     detail_df_t2.set_index('영업일', inplace=True)
                     st.dataframe(detail_df_t2.style.format({f'{t2_bond1}(%)': "{:.3f}", f'{t2_bond2}(%)': "{:.3f}", 'Spread(bp)': "{:.1f}"}), use_container_width=True)
 
+            # [우측 차트] 만기별 스프레드 커브 (수정 요청분 반영)
             with t2_chart_col2:
                 st.subheader("📉 만기별 Spread 커브")
+                
                 t2_curve = {'B1': [], 'B2': [], 'Spread_Latest': [], 'Avg': [], 'Max': [], 'Max_Date': [], 'Min': [], 'Min_Date': []}
                 for m in maturities_list:
                     sp_col = f'{m}_Spread'
@@ -445,19 +482,24 @@ if check_password():
                     t2_curve['Min_Date'].append(t2_final_df.loc[m_min_idx, '일자'].strftime('%Y-%m-%d'))
 
                 fig_t2_rt = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 분석 채권 1, 2 금리 선 그래프 (초기 숨김)
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['B1'], mode='lines+markers', name=f"{t2_bond1} 금리", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['B2'], mode='lines+markers', name=f"{t2_bond2} 금리", line=dict(color='#E67E22', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 
+                # 모든 스프레드를 선 그래프로 변경
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['Spread_Latest'], mode='lines+markers', name="최근 Spread(bp)", line=dict(color='red', width=2.5), hovertemplate="%{y:.1f} bp<extra></extra>"), secondary_y=True)
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['Avg'], mode='lines+markers', name="평균(Avg)", line=dict(color='green', dash='dash'), hovertemplate="%{y:.1f} bp<extra></extra>"), secondary_y=True)
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['Max'], mode='lines+markers', name="최대(Max)", line=dict(color='blue', dash='dot'), hovertemplate="%{y:.1f} bp<extra></extra>"), secondary_y=True)
                 fig_t2_rt.add_trace(go.Scatter(x=x_numeric, y=t2_curve['Min'], mode='lines+markers', name="최소(Min)", line=dict(color='purple', dash='dot'), hovertemplate="%{y:.1f} bp<extra></extra>"), secondary_y=True)
 
-                # 범례(Legend) 하단 이동
-                fig_t2_rt.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=0))
+                # [수정포인트] 모바일 범례 위치 및 여백 조절
+                fig_t2_rt.update_layout(height=400, hovermode="x unified", plot_bgcolor='white', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=50, b=80))
+                
                 fig_t2_rt.update_xaxes(tickvals=x_numeric, ticktext=maturities_list, showgrid=True, gridwidth=1, gridcolor='LightGray')
                 fig_t2_rt.update_yaxes(title_text="금리 (%)", showgrid=True, gridwidth=1, gridcolor='LightGray', secondary_y=False)
                 fig_t2_rt.update_yaxes(title_text="Spread (bp)", showgrid=False, secondary_y=True)
+                
                 st.plotly_chart(fig_t2_rt, use_container_width=True)
 
                 with st.expander("📊 만기별 Spread 상세 데이터 및 기록 날짜"):
