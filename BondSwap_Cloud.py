@@ -239,9 +239,12 @@ if check_password():
             def highlight_spread(s):
                 return ['font-weight: 900; color: #003366; background-color: #E8F4F8;' for _ in s]
 
-            format_dict = {
-                (m, '채권(%)'): "{:.3f}", (m, 'IRS(%)'): "{:.3f}", (m, 'Spread(bp)'): "{:.1f}" for m in maturities_list
-            }
+            # 딕셔너리 생성 구문 오류 수정 부분
+            format_dict = {}
+            for m in maturities_list:
+                format_dict[(m, '채권(%)')] = "{:.3f}"
+                format_dict[(m, 'IRS(%)')] = "{:.3f}"
+                format_dict[(m, 'Spread(bp)')] = "{:.1f}"
 
             idx = pd.IndexSlice
             styled_df = display_df.style.format(format_dict).apply(highlight_spread, subset=idx[:, idx[:, 'Spread(bp)']], axis=0)
