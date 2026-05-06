@@ -92,6 +92,13 @@ if check_password():
         st.header("⚙️ 분석 옵션 설정")
         st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
         
+        # --- 데이터 업데이트 버튼 추가 ---
+        if st.button("🔄 최신 데이터 불러오기", help="GitHub의 최신 데이터를 강제로 다시 불러옵니다.", use_container_width=True):
+            load_data.clear()  # 캐시된 데이터 삭제
+            st.rerun()         # 화면 새로고침
+        st.divider()
+        # ----------------------------------
+
         # 첫 번째 메뉴 익스팬더 (Tab 1)
         with st.expander("1) Bond Swap spread 분석", expanded=True):
             st.markdown("**1. 채권 종류**")
