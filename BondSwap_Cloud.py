@@ -91,13 +91,7 @@ if check_password():
     with st.sidebar:
         st.header("⚙️ 분석 옵션 설정")
         st.caption("교보증권 채권운용부 유지민 (02-3771-9160)")
-        
-        # --- 데이터 업데이트 버튼 추가 ---
-        if st.button("🔄 최신 데이터 불러오기", help="GitHub의 최신 데이터를 강제로 다시 불러옵니다.", use_container_width=True):
-            load_data.clear()  # 캐시된 데이터 삭제
-            st.rerun()         # 화면 새로고침
         st.divider()
-        # ----------------------------------
 
         # 첫 번째 메뉴 익스팬더 (Tab 1)
         with st.expander("1) Bond Swap spread 분석", expanded=True):
@@ -121,7 +115,6 @@ if check_password():
                 end_date = st.date_input("종료일", max_date, min_value=min_date, max_value=max_date, key='t1_ed')
                 
             st.markdown("**3. 그래프 분석 만기**")
-            # [수정됨] 통안증권 선택 시 만기 리스트 제한 (Tab 1)
             if selected_bond == '통안증권':
                 t1_maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y']
             else:
@@ -157,7 +150,6 @@ if check_password():
                 t2_end_date = st.date_input("종료일", max_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_ed')
                 
             st.markdown("**4. 그래프 분석 만기**")
-            # [수정됨] 통안증권 선택 시 만기 리스트 제한 (Tab 2)
             if '통안증권' in [t2_bond1, t2_bond2]:
                 t2_maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y']
             else:
@@ -210,7 +202,19 @@ if check_password():
     # ==========================================
     # 4. 메인 화면 출력 (Tab 분리)
     # ==========================================
-    st.title("📈 Bond-Swap Spread Dashboard")
+    
+    # --- 변경된 부분: 우측 상단 조그만 새로고침 버튼 배치 ---
+    col1, col2, col3 = st.columns([7, 1, 1])  # 비율을 나누어 우측 끝으로 버튼을 밉니다.
+    with col1:
+        st.title("📈 Bond-Swap Spread Dashboard")
+    with col3:
+        st.write("") # 타이틀과 세로 정렬을 맞추기 위한 공백
+        st.write("")
+        if st.button("🔄 새로고침", help="GitHub 최신 데이터 불러오기"):
+            load_data.clear()
+            st.rerun()
+    # ----------------------------------------------------
+
     tab1, tab2 = st.tabs(["1) Bond Swap Spread 분석", "2) Credit Spread 분석"])
 
     # ------------------------------------------
@@ -310,7 +314,6 @@ if check_password():
                     curve_data['IRS'].append(latest_row[f'{m}_IRS'])
 
                 fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-                # [수정됨] Tab 1 x_numeric 동적 할당
                 t1_x_numeric = all_x_numeric[:len(t1_maturities_list)]
                 
                 fig2.add_trace(go.Scatter(x=t1_x_numeric, y=curve_data['Bond'], mode='lines+markers', name=f"채권금리 ({selected_bond})", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
@@ -465,7 +468,6 @@ if check_password():
                     t2_curve['Min_Date'].append(t2_final_df.loc[m_min_idx, '일자'].strftime('%Y-%m-%d'))
 
                 fig_t2_rt = make_subplots(specs=[[{"secondary_y": True}]])
-                # [수정됨] Tab 2 x_numeric 동적 할당
                 t2_x_numeric = all_x_numeric[:len(t2_maturities_list)]
                 
                 fig_t2_rt.add_trace(go.Scatter(x=t2_x_numeric, y=t2_curve['B1'], mode='lines+markers', name=f"{t2_bond1} 금리", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
