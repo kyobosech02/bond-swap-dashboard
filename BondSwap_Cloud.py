@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime 
+import os
+from zoneinfo import ZoneInfo
 
 # 페이지 기본 설정 (반드시 최상단에 위치)
 st.set_page_config(page_title="Bond-Swap Spread 분석", page_icon="📈", layout="wide")
@@ -31,9 +33,17 @@ def check_password():
 # ==========================================
 # 1. 데이터 로드 및 전처리 함수 정의
 # ==========================================
-@st.cache_data
-def load_data():
-    file_path = "Data.xlsx"
+DATA_FILE = "Data.xlsx"
+
+def data_signature(path: str = DATA_FILE) -> tuple[int, int]:
+    """(mtime_ns, size) of the workbook. Passed to load_data as its cache key, so a new file
+    pulled from GitHub is read on the next rerun without anyone pressing the refresh button."""
+    info = os.stat(path)
+    return info.st_mtime_ns, info.st_size
+
+@st.cache_data(ttl=600)
+def load_data(signature: tuple[int, int], file_path: str = DATA_FILE):
+    del signature  # only part of the cache key
     
     # --- 1. BOND 데이터 처리 ---
     bond_raw = pd.read_excel(file_path, sheet_name='BOND', header=None)
@@ -76,7 +86,7 @@ def load_data():
 # ==========================================
 if check_password():
     try:
-        bond_data, irs_data = load_data()
+        bond_data, irs_data = load_data(data_signature())
     except Exception as e:
         st.error(f"🚨 엑셀 파일을 읽는 중 오류가 발생했습니다.\nError: {e}")
         st.stop()
@@ -207,6 +217,11 @@ if check_password():
     col1, col2, col3 = st.columns([7, 1, 1])  # 비율을 나누어 우측 끝으로 버튼을 밉니다.
     with col1:
         st.title("📈 Bond-Swap Spread Dashboard")
+        latest_dates = [df['일자'].max() for df in bond_data.values() if not df.empty]
+        if latest_dates:
+            latest = max(latest_dates)
+            file_time = datetime.datetime.fromtimestamp(os.stat(DATA_FILE).st_mtime, tz=ZoneInfo("Asia/Seoul"))
+            st.caption(f"데이터 기준일 {latest:%Y-%m-%d} · 파일 갱신 {file_time:%m-%d %H:%M} KST")
     with col3:
         st.write("") # 타이틀과 세로 정렬을 맞추기 위한 공백
         st.write("")
