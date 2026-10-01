@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime 
 import os
+import re
 from zoneinfo import ZoneInfo
 
 # 페이지 기본 설정 (반드시 최상단에 위치)
@@ -35,6 +36,105 @@ def check_password():
 # ==========================================
 DATA_FILE = "Data.xlsx"
 
+# Position of each maturity on the curve charts' x axis, in years.
+MATURITY_YEARS = {
+    '3M': 0.25, '6M': 0.5, '9M': 0.75,
+    '1Y': 1, '1.5Y': 1.5, '2Y': 2, '3Y': 3, '4Y': 4, '5Y': 5,
+    '7Y': 7, '10Y': 10, '15Y': 15, '20Y': 20, '30Y': 30,
+}
+
+DATE_HEADER = '일자'
+# BOND field headers look like '3월이하(당일)' or '10년이하(당일)'.
+MATURITY_HEADER_RE = re.compile(r'(\d+(?:\.\d+)?)\s*(월|년)이하')
+
+
+def maturity_label(header):
+    """Short label for a BOND field header ('3월이하(당일)' -> '3M', '10년이하(당일)' -> '10Y').
+    Returns None for anything that is not a maturity we know how to place on the x axis."""
+    if not isinstance(header, str):
+        return None
+    matched = MATURITY_HEADER_RE.search(header)
+    if not matched:
+        return None
+    amount = float(matched.group(1))
+    label = f"{amount:g}M" if matched.group(2) == '월' else f"{amount:g}Y"
+    return label if label in MATURITY_YEARS else None
+
+
+def _block_starts(raw, header_row: int = 3) -> list:
+    """Column indexes where a block begins: every column whose field header is '일자'.
+    Splitting on the headers rather than a fixed stride lets blocks differ in width."""
+    row = raw.iloc[header_row]
+    return [c for c in range(raw.shape[1])
+            if isinstance(row.iloc[c], str) and row.iloc[c].strip() == DATE_HEADER]
+
+
+def parse_bond_sheet(bond_raw) -> dict:
+    """Split the BOND sheet into one DataFrame per bond, keyed by bond name. Each frame has
+    columns ['일자'] + that bond's own maturity labels, in sheet order."""
+    header_row = bond_raw.iloc[3]
+    starts = _block_starts(bond_raw)
+    bond_dict = {}
+
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else bond_raw.shape[1]
+
+        bond_name = bond_raw.iloc[1, start + 1] if start + 1 < end else None
+        if bond_name is None or pd.isna(bond_name):
+            bond_name = bond_raw.iloc[2, start]
+            if pd.isna(bond_name):
+                continue
+
+        positions, columns = [start], [DATE_HEADER]
+        for col_idx in range(start + 1, end):
+            header = header_row.iloc[col_idx]
+            if pd.isna(header):
+                continue
+            positions.append(col_idx)
+            # Unrecognised headers keep their raw name and are ignored by maturities_of().
+            columns.append(maturity_label(header) or str(header))
+
+        df_temp = bond_raw.iloc[4:, positions].copy()
+        df_temp.columns = columns
+        df_temp[DATE_HEADER] = pd.to_datetime(df_temp[DATE_HEADER], errors='coerce')
+        for col in columns[1:]:
+            df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce')
+
+        bond_dict[bond_name] = df_temp.dropna(subset=[DATE_HEADER]).sort_values(DATE_HEADER).reset_index(drop=True)
+
+    return bond_dict
+
+
+def parse_irs_sheet(irs_raw) -> dict:
+    """Split the IRS sheet into one DataFrame per tenor, keyed by the row-2 title without its
+    'IRS ' prefix ('IRS 10Y' -> '10Y', 'CD91' stays 'CD91'). Columns are ['일자', '금리']."""
+    irs_dict = {}
+
+    for start in _block_starts(irs_raw):
+        if start + 1 >= irs_raw.shape[1]:
+            continue
+        title = irs_raw.iloc[2, start]
+        if pd.isna(title):
+            continue
+        key = str(title).strip()
+        if key.startswith('IRS '):
+            key = key[len('IRS '):].strip()
+
+        df_temp = irs_raw.iloc[4:, start:start + 2].copy()
+        df_temp.columns = [DATE_HEADER, '금리']
+        df_temp[DATE_HEADER] = pd.to_datetime(df_temp[DATE_HEADER], errors='coerce')
+        df_temp['금리'] = pd.to_numeric(df_temp['금리'], errors='coerce')
+
+        irs_dict[key] = df_temp.dropna(subset=[DATE_HEADER]).sort_values(DATE_HEADER).reset_index(drop=True)
+
+    return irs_dict
+
+
+def maturities_of(df) -> list:
+    """Maturity columns of a parsed bond frame, in sheet order."""
+    return [col for col in df.columns if col in MATURITY_YEARS]
+
+
 def data_signature(path: str = DATA_FILE) -> tuple[int, int]:
     """(mtime_ns, size) of the workbook. Passed to load_data as its cache key, so a new file
     pulled from GitHub is read on the next rerun without anyone pressing the refresh button."""
@@ -44,40 +144,13 @@ def data_signature(path: str = DATA_FILE) -> tuple[int, int]:
 @st.cache_data(ttl=600)
 def load_data(signature: tuple[int, int], file_path: str = DATA_FILE):
     del signature  # only part of the cache key
-    
+
     # --- 1. BOND 데이터 처리 ---
-    bond_raw = pd.read_excel(file_path, sheet_name='BOND', header=None)
-    bond_dict = {}
-    maturities = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
-    
-    for i in range(0, bond_raw.shape[1], 10):
-        bond_name = bond_raw.iloc[1, i+1]
-        if pd.isna(bond_name):
-            bond_name = bond_raw.iloc[2, i]
-            if pd.isna(bond_name): continue
-            
-        df_temp = bond_raw.iloc[4:, i:i+10].copy()
-        df_temp.columns = ['일자'] + maturities
-        df_temp['일자'] = pd.to_datetime(df_temp['일자'], errors='coerce')
-        for col in maturities:
-            df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce')
-            
-        bond_dict[bond_name] = df_temp.dropna(subset=['일자']).sort_values('일자').reset_index(drop=True)
+    bond_dict = parse_bond_sheet(pd.read_excel(file_path, sheet_name='BOND', header=None))
 
     # --- 2. IRS 데이터 처리 ---
-    irs_raw = pd.read_excel(file_path, sheet_name='IRS', header=None)
-    irs_dict = {}
-    irs_mat_names = ['CD91', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
-    
-    for i, mat_label in enumerate(irs_mat_names):
-        col_idx = i * 2
-        df_temp = irs_raw.iloc[4:, col_idx:col_idx+2].copy()
-        df_temp.columns = ['일자', '금리']
-        df_temp['일자'] = pd.to_datetime(df_temp['일자'], errors='coerce')
-        df_temp['금리'] = pd.to_numeric(df_temp['금리'], errors='coerce')
-        
-        irs_dict[mat_label] = df_temp.dropna(subset=['일자']).sort_values('일자').reset_index(drop=True)
-        
+    irs_dict = parse_irs_sheet(pd.read_excel(file_path, sheet_name='IRS', header=None))
+
     return bond_dict, irs_dict
 
 
@@ -91,9 +164,8 @@ if check_password():
         st.error(f"🚨 엑셀 파일을 읽는 중 오류가 발생했습니다.\nError: {e}")
         st.stop()
 
-    # 전체 기준 매핑
-    all_maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y', '4Y', '5Y']
-    all_x_numeric = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
+    # 통안증권은 3Y 이하 구간만 분석 대상
+    MSB_MATURITIES = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y']
 
     # ==========================================
     # 2. 사이드바 (UI 구조 변경: Expander 적용)
@@ -125,10 +197,12 @@ if check_password():
                 end_date = st.date_input("종료일", max_date, min_value=min_date, max_value=max_date, key='t1_ed')
                 
             st.markdown("**3. 그래프 분석 만기**")
+            t1_bond_maturities = maturities_of(bond_data[selected_bond])
             if selected_bond == '통안증권':
-                t1_maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y']
-            else:
-                t1_maturities_list = all_maturities_list.copy()
+                t1_bond_maturities = [m for m in t1_bond_maturities if m in MSB_MATURITIES]
+            # IRS 커브에 대응 만기가 있는 구간만 분석 가능 (3M <-> CD91)
+            t1_maturities_list = [m for m in t1_bond_maturities
+                                  if ('CD91' if m == '3M' else m) in irs_data]
 
             t1_default_idx = t1_maturities_list.index('1Y') if '1Y' in t1_maturities_list else 0
             selected_mat = st.selectbox("3. 분석 만기", t1_maturities_list, index=t1_default_idx, label_visibility="collapsed")
@@ -160,10 +234,11 @@ if check_password():
                 t2_end_date = st.date_input("종료일", max_date_t2, min_value=min_date_t2, max_value=max_date_t2, key='t2_ed')
                 
             st.markdown("**4. 그래프 분석 만기**")
+            t2_bond2_maturities = set(maturities_of(bond_data[t2_bond2]))
+            t2_maturities_list = [m for m in maturities_of(bond_data[t2_bond1])
+                                  if m in t2_bond2_maturities]
             if '통안증권' in [t2_bond1, t2_bond2]:
-                t2_maturities_list = ['3M', '6M', '9M', '1Y', '1.5Y', '2Y', '3Y']
-            else:
-                t2_maturities_list = all_maturities_list.copy()
+                t2_maturities_list = [m for m in t2_maturities_list if m in MSB_MATURITIES]
 
             t2_default_idx = t2_maturities_list.index('2Y') if '2Y' in t2_maturities_list else 0
             t2_selected_mat = st.selectbox("분석 만기", t2_maturities_list, index=t2_default_idx, key='t2_mat', label_visibility="collapsed")
@@ -329,7 +404,7 @@ if check_password():
                     curve_data['IRS'].append(latest_row[f'{m}_IRS'])
 
                 fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-                t1_x_numeric = all_x_numeric[:len(t1_maturities_list)]
+                t1_x_numeric = [MATURITY_YEARS[m] for m in t1_maturities_list]
                 
                 fig2.add_trace(go.Scatter(x=t1_x_numeric, y=curve_data['Bond'], mode='lines+markers', name=f"채권금리 ({selected_bond})", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 fig2.add_trace(go.Scatter(x=t1_x_numeric, y=curve_data['IRS'], mode='lines+markers', name="IRS금리", line=dict(color='#E67E22', width=2, dash='dash'), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
@@ -483,7 +558,7 @@ if check_password():
                     t2_curve['Min_Date'].append(t2_final_df.loc[m_min_idx, '일자'].strftime('%Y-%m-%d'))
 
                 fig_t2_rt = make_subplots(specs=[[{"secondary_y": True}]])
-                t2_x_numeric = all_x_numeric[:len(t2_maturities_list)]
+                t2_x_numeric = [MATURITY_YEARS[m] for m in t2_maturities_list]
                 
                 fig_t2_rt.add_trace(go.Scatter(x=t2_x_numeric, y=t2_curve['B1'], mode='lines+markers', name=f"{t2_bond1} 금리", line=dict(color='#2E86C1', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
                 fig_t2_rt.add_trace(go.Scatter(x=t2_x_numeric, y=t2_curve['B2'], mode='lines+markers', name=f"{t2_bond2} 금리", line=dict(color='#E67E22', width=2), visible='legendonly', hovertemplate="%{y:.3f}%<extra></extra>"), secondary_y=False)
